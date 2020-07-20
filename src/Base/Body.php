@@ -353,6 +353,38 @@ abstract class Body
             return true;
         }
 
+        // if ($schemaArray['anyOf']) {
+        //   foreach($schemaArray['anyOf'] as $key=>$newSchema) {
+        //     $res = $this->matchSchema($name.'-'.$key, $newSchema, $body);
+        //     if ($res) {
+        //       return true;
+        //     }
+        //   }
+        // }
+        
+        if ($schemaArray['allOf']) {
+          foreach($schemaArray['allOf'] as $key=>$newSchema) {
+            try {
+              $res = $this->matchSchema($name.'-'.$key, $newSchema, $body);
+            } catch (\Throwable $t) {
+              break;
+            }
+          }
+        }
+        
+        if ($schemaArray['oneOf']) {
+          foreach($schemaArray['allOf'] as $key=>$newSchema) {
+            try {
+              $res = $this->matchSchema($name.'-'.$key, $newSchema, $body);
+            } catch (\Throwable $t) {
+              $res = false;
+            }
+            if ($res) {
+              return true;
+            }
+          }
+        }
+
         throw new GenericSwaggerException("Not all cases are defined. Please open an issue about this. Schema: $name");
     }
 
