@@ -132,7 +132,6 @@ abstract class Body
         if ($type !== 'integer' && $type !== 'float' && $type !== 'number') {
             return null;
         }
-
         if (!is_numeric($body)) {
             throw new NotMatchedException("Expected '$name' to be numeric, but found '$body'. ", $this->structure);
         }
@@ -298,8 +297,7 @@ abstract class Body
                 $this->structure
             );
         }
-
-        if (count($body) > 0) {
+        if (count($body) > 0 && @!$schemaArray['additionalProperties']) {
             throw new NotMatchedException(
                 "The property(ies) '"
                 . implode(', ', array_keys($body))
@@ -309,7 +307,53 @@ abstract class Body
         }
         return true;
     }
-
+    
+    protected static function combinate($root, &$result, $index = 0, $res = []) {
+        $oldRes = $res;
+        if (isset($root[$index])) {
+            $res = [];
+            foreach ($root[$index] as $item) {
+                self::combinate($root,$result, $index+1,array_merge($oldRes, [$item]));
+            }
+        }
+        if ($res) {
+            $result[] = $res;
+        }
+    }
+    
+    protected function getSchema($schemaArray,$index = 0) {
+      if (is_array($schemaArray)) {
+        if (isset($schemaArray['oneOf'])) {
+          $tmp = [];
+          foreach ($schemaArray['oneOf'] as $item) {
+            $tmp[] = $this->getSchema($item,$index+1);
+          }
+          $schemaArray['oneOf'] = $tmp;
+        } elseif (isset($schemaArray['allOf'])) {
+          $tmp = [];
+          foreach ($schemaArray['allOf'] as $item) {
+            $res = $this->getSchema($item, $index+1);
+            if (isset($res['oneOf'])) {
+              $tmp[] = $res['oneOf'];
+            } else {
+              $tmp[] = [$res];
+            }
+          }
+          $res = [];
+          self::combinate($tmp, $res);
+          
+          unset($schemaArray['allOf']);
+          $schemaArray['oneOf'] = array_map(function($item){
+            return array_replace_recursive(...$item);
+          }, $res);
+        } elseif (isset($schemaArray['$ref'])) {
+            $ref = $this->getSchema($this->schema->getDefinition($schemaArray['$ref']));
+            unset($schemaArray['$ref']);
+            $schemaArray = array_replace_recursive($schemaArray, $ref);
+        }
+      }
+      return $schemaArray;
+    }
     /**
      * @param string $name
      * @param array $schemaArray
@@ -352,39 +396,24 @@ abstract class Body
         if ($schemaArray === []) {
             return true;
         }
-
-        // if ($schemaArray['anyOf']) {
-        //   foreach($schemaArray['anyOf'] as $key=>$newSchema) {
-        //     $res = $this->matchSchema($name.'-'.$key, $newSchema, $body);
-        //     if ($res) {
-        //       return true;
-        //     }
-        //   }
-        // }
-        
-        if ($schemaArray['allOf']) {
-          foreach($schemaArray['allOf'] as $key=>$newSchema) {
-            try {
-              $res = $this->matchSchema($name.'-'.$key, $newSchema, $body);
-            } catch (\Throwable $t) {
-              break;
-            }
-          }
-        }
+        $schemaArray = $this->getSchema($schemaArray);
         
         if ($schemaArray['oneOf']) {
-          foreach($schemaArray['allOf'] as $key=>$newSchema) {
+          $res = false;
+          foreach($schemaArray['oneOf'] as $key=>$newSchema) {
             try {
               $res = $this->matchSchema($name.'-'.$key, $newSchema, $body);
+              if ($res) {
+                break;
+              }
             } catch (\Throwable $t) {
-              $res = false;
-            }
-            if ($res) {
-              return true;
             }
           }
-        }
 
+          if ($res) {
+            return true;
+          }
+        }
         throw new GenericSwaggerException("Not all cases are defined. Please open an issue about this. Schema: $name");
     }
 
